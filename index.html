@@ -1,0 +1,748 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prop Board</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #f4f2ee;
+  --surface: #ffffff;
+  --surface-2: #f7f6f3;
+  --line: #e4e1da;
+  --text: #17181a;
+  --muted: #6b6f76;
+  --faint: #9a9ea5;
+  --accent: #2f6bff;
+  --win: #14a05a;
+  --win-bg: #e3f6ec;
+  --loss: #e0413a;
+  --loss-bg: #fde8e7;
+  --push: #b08400;
+  --push-bg: #fbf3d6;
+  --live: #ff5a1f;
+  --track: #ecebe6;
+  --shadow: 0 1px 2px rgba(20,20,20,.05), 0 6px 20px rgba(20,20,20,.06);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e0f12; --surface: #17191e; --surface-2: #1d2026; --line: #2a2e36;
+    --text: #eef0f3; --muted: #9aa1ab; --faint: #6c737e; --accent: #5b8cff;
+    --win: #2fd17f; --win-bg: #12301f; --loss: #ff6159; --loss-bg: #3a1716;
+    --push: #e6b93a; --push-bg: #33290e; --live: #ff7a45; --track: #262a31;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e0f12; --surface: #17191e; --surface-2: #1d2026; --line: #2a2e36;
+  --text: #eef0f3; --muted: #9aa1ab; --faint: #6c737e; --accent: #5b8cff;
+  --win: #2fd17f; --win-bg: #12301f; --loss: #ff6159; --loss-bg: #3a1716;
+  --push: #e6b93a; --push-bg: #33290e; --live: #ff7a45; --track: #262a31;
+  --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--text);
+  font: 14px/1.4 Inter, system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
+button { font: inherit; color: inherit; cursor: pointer; }
+input, select { font: inherit; color: inherit; }
+
+.wrap { max-width: 1240px; margin: 0 auto; padding: 24px 16px 64px; }
+header.top { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
+.brand { font-weight: 800; font-size: 20px; letter-spacing: -.02em; display: flex; align-items: center; gap: 10px; }
+.brand .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--live); box-shadow: 0 0 0 4px color-mix(in srgb, var(--live) 20%, transparent); }
+.brand .dot.idle { background: var(--faint); box-shadow: none; }
+.top .spacer { flex: 1; }
+.updated { color: var(--faint); font-size: 12px; }
+.icon-btn { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; width: 36px; height: 36px; display: grid; place-items: center; }
+.icon-btn:hover { border-color: var(--faint); }
+
+/* search + composer */
+.search { position: relative; }
+.search-box {
+  display: flex; align-items: center; gap: 10px; background: var(--surface);
+  border: 1px solid var(--line); border-radius: 14px; padding: 0 14px; height: 52px; box-shadow: var(--shadow);
+}
+.search-box:focus-within { border-color: var(--accent); }
+.search-box input { flex: 1; border: 0; outline: 0; background: transparent; font-size: 16px; min-width: 0; }
+.search-box svg { color: var(--faint); flex: none; }
+.results {
+  position: absolute; z-index: 20; left: 0; right: 0; top: 58px; background: var(--surface);
+  border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; display: none;
+}
+.results.open { display: block; }
+.result { display: flex; align-items: center; gap: 12px; padding: 10px 14px; width: 100%; border: 0; background: none; text-align: left; }
+.result:hover, .result.active { background: var(--surface-2); }
+.result .meta { color: var(--muted); font-size: 12px; }
+.results .empty { padding: 14px; color: var(--muted); }
+
+.avatar { width: 40px; height: 40px; border-radius: 50%; background: var(--surface-2); object-fit: cover; flex: none; border: 1px solid var(--line); display: grid; place-items: center; font-weight: 700; color: var(--muted); font-size: 13px; overflow: hidden; }
+.avatar img { width: 100%; height: 100%; object-fit: cover; }
+
+.composer {
+  margin-top: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+  padding: 16px; box-shadow: var(--shadow); display: none;
+}
+.composer.open { display: block; }
+.composer .who { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.composer .who .name { font-weight: 700; font-size: 16px; }
+.composer .who .meta { color: var(--muted); font-size: 12px; }
+.composer .who .x { margin-left: auto; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+.chip {
+  border: 1px solid var(--line); background: var(--surface-2); border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 500;
+}
+.chip:hover { border-color: var(--faint); }
+.chip.on { background: var(--text); color: var(--bg); border-color: var(--text); }
+.chip-group-label { width: 100%; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); margin-top: 4px; }
+.row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.seg { display: inline-flex; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 3px; }
+.seg button { border: 0; background: none; padding: 6px 14px; border-radius: 7px; font-weight: 600; font-size: 13px; color: var(--muted); }
+.seg button.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+.num-input { width: 96px; height: 38px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); padding: 0 12px; outline: 0; font-family: "JetBrains Mono", monospace; font-weight: 700; }
+.num-input:focus { border-color: var(--accent); }
+.primary { background: var(--accent); color: #fff; border: 0; border-radius: 10px; height: 38px; padding: 0 18px; font-weight: 700; }
+.primary:disabled { opacity: .45; cursor: default; }
+
+/* toolbar */
+.toolbar { display: flex; align-items: center; gap: 10px; margin: 28px 0 14px; flex-wrap: wrap; }
+.toolbar .count { color: var(--faint); font-size: 12px; margin-left: 4px; }
+.ghost { background: none; border: 1px solid var(--line); border-radius: 10px; height: 34px; padding: 0 12px; font-size: 13px; color: var(--muted); }
+.ghost:hover { color: var(--text); border-color: var(--faint); }
+.toolbar .spacer { flex: 1; }
+
+/* board */
+.board { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 14px; align-items: start; }
+.card {
+  position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: 16px;
+  padding: 14px 16px 14px; box-shadow: var(--shadow); overflow: hidden; transition: transform .15s, box-shadow .15s, opacity .15s;
+}
+.card::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 4px; background: var(--pin, transparent); }
+.card.dragging { opacity: .4; }
+.card.drop-before { box-shadow: -3px 0 0 var(--accent), var(--shadow); }
+.card.won { border-color: color-mix(in srgb, var(--win) 55%, var(--line)); }
+.card.lost { border-color: color-mix(in srgb, var(--loss) 45%, var(--line)); }
+.card.lost .big, .card.lost .card-head .name { opacity: .7; }
+.card-head { display: flex; align-items: center; gap: 10px; }
+.card-head .name { font-weight: 700; font-size: 15px; line-height: 1.2; }
+.card-head .team { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 12px; margin-top: 2px; }
+.card-head .team img { width: 16px; height: 16px; }
+.card-head .tools { margin-left: auto; display: flex; gap: 2px; align-self: flex-start; }
+.tool { border: 0; background: none; width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; color: var(--faint); }
+.tool:hover { background: var(--surface-2); color: var(--text); }
+.grip { cursor: grab; }
+.prop-line { margin: 14px 0 6px; display: flex; align-items: baseline; gap: 8px; }
+.prop-line .side { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
+.prop-line .side.over { color: var(--win); }
+.prop-line .side.under { color: var(--accent); }
+.prop-line .stat { color: var(--muted); font-weight: 500; }
+.big { display: flex; align-items: baseline; gap: 6px; }
+.big .val { font-size: 40px; font-weight: 800; letter-spacing: -.03em; line-height: 1; font-variant-numeric: tabular-nums; }
+.big .of { color: var(--faint); font-size: 18px; font-weight: 600; }
+.big .need { margin-left: auto; font-size: 12px; color: var(--muted); font-weight: 600; }
+.val.bump { animation: bump .7s ease; }
+@keyframes bump { 0% { color: var(--live); transform: scale(1.12); } 100% { color: inherit; transform: none; } }
+
+.bar { position: relative; height: 10px; background: var(--track); border-radius: 999px; margin: 12px 0 6px; overflow: visible; }
+.bar .fill { position: absolute; inset: 0 auto 0 0; border-radius: 999px; background: var(--accent); transition: width .6s cubic-bezier(.2,.8,.2,1); }
+.card.won .bar .fill { background: var(--win); }
+.card.lost .bar .fill { background: var(--loss); }
+.card.push .bar .fill { background: var(--push); }
+.bar .mark { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--text); border-radius: 2px; transform: translateX(-1px); }
+.bar .mark span { position: absolute; top: -18px; left: 50%; transform: translateX(-50%); font-size: 10px; font-weight: 700; color: var(--muted); white-space: nowrap; }
+.foot { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 12px; color: var(--muted); min-height: 22px; }
+.foot .game { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pill { margin-left: auto; flex: none; font-size: 11px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; background: var(--surface-2); color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
+.pill.live { color: var(--live); background: color-mix(in srgb, var(--live) 14%, transparent); }
+.pill.live::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: pulse 1.4s infinite; }
+.pill.won { color: var(--win); background: var(--win-bg); }
+.pill.lost { color: var(--loss); background: var(--loss-bg); }
+.pill.push { color: var(--push); background: var(--push-bg); }
+@keyframes pulse { 50% { opacity: .25; } }
+.note { margin-top: 10px; font-size: 13px; color: var(--text); background: var(--surface-2); border-radius: 8px; padding: 6px 10px; white-space: pre-wrap; }
+
+.editor { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); display: grid; gap: 10px; }
+.editor textarea { width: 100%; min-height: 54px; resize: vertical; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); padding: 8px 10px; font: inherit; color: inherit; outline: 0; }
+.swatches { display: flex; gap: 6px; }
+.swatch { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--surface); box-shadow: 0 0 0 1px var(--line); }
+.swatch.on { box-shadow: 0 0 0 2px var(--text); }
+.swatch.none { background: linear-gradient(135deg, transparent 45%, var(--loss) 45% 55%, transparent 55%), var(--surface-2); }
+.editor select { height: 38px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); padding: 0 10px; }
+
+.empty-board { grid-column: 1 / -1; text-align: center; padding: 72px 16px; color: var(--faint); border: 2px dashed var(--line); border-radius: 18px; }
+.empty-board b { display: block; color: var(--muted); font-size: 16px; margin-bottom: 4px; }
+
+@media (max-width: 560px) {
+  .wrap { padding-top: 16px; }
+  .big .val { font-size: 34px; }
+  .board { grid-template-columns: 1fr; }
+  .updated { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand"><span class="dot idle" id="liveDot"></span>Prop Board</div>
+    <div class="spacer"></div>
+    <span class="updated mono" id="updated"></span>
+    <button class="icon-btn" id="refreshBtn" title="Refresh now" aria-label="Refresh now">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+    </button>
+    <button class="icon-btn" id="themeBtn" title="Theme" aria-label="Toggle theme">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg>
+    </button>
+  </header>
+
+  <div class="search">
+    <div class="search-box">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="q" autocomplete="off" spellcheck="false" placeholder="CeeDee Lamb receiving yards 69.5">
+    </div>
+    <div class="results" id="results"></div>
+  </div>
+
+  <div class="composer" id="composer"></div>
+
+  <div class="toolbar">
+    <div class="seg" id="filters"></div>
+    <span class="count" id="count"></span>
+    <div class="spacer"></div>
+    <button class="ghost" id="clearSettled">Clear settled</button>
+  </div>
+
+  <div class="board" id="board"></div>
+</div>
+
+<script>
+const LEAGUES = {
+  nfl: { path: 'football/nfl', label: 'NFL' },
+  nba: { path: 'basketball/nba', label: 'NBA' },
+  mlb: { path: 'baseball/mlb', label: 'MLB' },
+};
+const SITE = 'https://site.api.espn.com/apis/site/v2/sports/';
+const SEARCH = 'https://site.web.api.espn.com/apis/common/v3/search';
+const POLL_MS = 15000;
+const PINS = ['', '#2f6bff', '#14a05a', '#ff5a1f', '#e0413a', '#a352ff', '#e6b93a'];
+
+const sum = (...ks) => s => ks.reduce((a, k) => a + (s[k] || 0), 0);
+
+// Keys are "<group>.<espn key>"; NBA uses group "box", MLB "bat"/"pit".
+const STATS = {
+  nfl: [
+    { id: 'recYds', label: 'Receiving yards', group: 'Receiving', get: sum('receiving.receivingYards'), alias: ['receiving yards', 'rec yards', 'rec yds', 'receiving'] },
+    { id: 'rec', label: 'Receptions', group: 'Receiving', get: sum('receiving.receptions'), alias: ['receptions', 'catches', 'recs'] },
+    { id: 'longRec', label: 'Longest reception', group: 'Receiving', get: sum('receiving.longReception'), alias: ['longest reception', 'long rec'] },
+    { id: 'rushYds', label: 'Rushing yards', group: 'Rushing', get: sum('rushing.rushingYards'), alias: ['rushing yards', 'rush yards', 'rush yds', 'rushing'] },
+    { id: 'rushAtt', label: 'Rush attempts', group: 'Rushing', get: sum('rushing.rushingAttempts'), alias: ['rush attempts', 'carries'] },
+    { id: 'longRush', label: 'Longest rush', group: 'Rushing', get: sum('rushing.longRushing'), alias: ['longest rush', 'long rush'] },
+    { id: 'rushRec', label: 'Rush + rec yards', group: 'Rushing', get: sum('rushing.rushingYards', 'receiving.receivingYards'), alias: ['rush rec', 'rush + rec', 'scrimmage yards', 'rush and rec'] },
+    { id: 'passYds', label: 'Passing yards', group: 'Passing', get: sum('passing.passingYards'), alias: ['passing yards', 'pass yards', 'pass yds', 'passing'] },
+    { id: 'passTD', label: 'Passing TDs', group: 'Passing', get: sum('passing.passingTouchdowns'), alias: ['passing tds', 'passing touchdowns', 'pass tds', 'pass td'] },
+    { id: 'cmp', label: 'Completions', group: 'Passing', get: sum('passing.completions'), alias: ['completions'] },
+    { id: 'att', label: 'Pass attempts', group: 'Passing', get: sum('passing.passingAttempts'), alias: ['pass attempts', 'passing attempts'] },
+    { id: 'int', label: 'Interceptions thrown', group: 'Passing', get: sum('passing.interceptions'), alias: ['interceptions', 'ints'] },
+    { id: 'td', label: 'Touchdowns', group: 'Scoring', get: sum('rushing.rushingTouchdowns', 'receiving.receivingTouchdowns', 'kickReturns.kickReturnTouchdowns', 'puntReturns.puntReturnTouchdowns', 'interceptions.interceptionTouchdowns'), alias: ['anytime td', 'anytime touchdown', 'touchdowns', 'touchdown', 'td', 'tds'] },
+    { id: 'kickPts', label: 'Kicking points', group: 'Scoring', get: sum('kicking.totalKickingPoints'), alias: ['kicking points'] },
+    { id: 'tkl', label: 'Tackles', group: 'Defense', get: sum('defensive.totalTackles'), alias: ['tackles'] },
+    { id: 'sacks', label: 'Sacks', group: 'Defense', get: sum('defensive.sacks'), alias: ['sacks'] },
+  ],
+  nba: [
+    { id: 'pts', label: 'Points', get: sum('box.points'), alias: ['points', 'pts'] },
+    { id: 'reb', label: 'Rebounds', get: sum('box.rebounds'), alias: ['rebounds', 'reb', 'rebs', 'boards'] },
+    { id: 'ast', label: 'Assists', get: sum('box.assists'), alias: ['assists', 'ast', 'asts', 'dimes'] },
+    { id: 'threes', label: '3-pointers made', get: sum('box.threePointFieldGoalsMade'), alias: ['threes', '3 pointers', '3pm', '3s', 'three pointers'] },
+    { id: 'pra', label: 'Pts + reb + ast', get: sum('box.points', 'box.rebounds', 'box.assists'), alias: ['pra', 'pts reb ast', 'points rebounds assists'] },
+    { id: 'pr', label: 'Pts + reb', get: sum('box.points', 'box.rebounds'), alias: ['pts reb', 'points rebounds', 'p+r'] },
+    { id: 'pa', label: 'Pts + ast', get: sum('box.points', 'box.assists'), alias: ['pts ast', 'points assists', 'p+a'] },
+    { id: 'ra', label: 'Reb + ast', get: sum('box.rebounds', 'box.assists'), alias: ['reb ast', 'rebounds assists', 'r+a'] },
+    { id: 'stl', label: 'Steals', get: sum('box.steals'), alias: ['steals', 'stl'] },
+    { id: 'blk', label: 'Blocks', get: sum('box.blocks'), alias: ['blocks', 'blk'] },
+    { id: 'stocks', label: 'Steals + blocks', get: sum('box.steals', 'box.blocks'), alias: ['stocks', 'steals blocks'] },
+    { id: 'to', label: 'Turnovers', get: sum('box.turnovers'), alias: ['turnovers', 'to'] },
+    { id: 'fgm', label: 'Field goals made', get: sum('box.fieldGoalsMade'), alias: ['field goals', 'fgm'] },
+  ],
+  mlb: [
+    { id: 'hits', label: 'Hits', group: 'Batting', get: sum('bat.hits'), alias: ['hits'] },
+    { id: 'hr', label: 'Home runs', group: 'Batting', get: sum('bat.homeRuns'), alias: ['home runs', 'home run', 'homers', 'hr', 'hrs'] },
+    { id: 'tb', label: 'Total bases', group: 'Batting', get: sum('bat.totalBases'), alias: ['total bases', 'tb', 'bases'] },
+    { id: 'rbi', label: 'RBIs', group: 'Batting', get: sum('bat.RBIs'), alias: ['rbis', 'rbi'] },
+    { id: 'runs', label: 'Runs', group: 'Batting', get: sum('bat.runs'), alias: ['runs scored', 'runs'] },
+    { id: 'hrr', label: 'Hits + runs + RBIs', group: 'Batting', get: sum('bat.hits', 'bat.runs', 'bat.RBIs'), alias: ['hits runs rbis', 'h+r+rbi', 'hrr'] },
+    { id: 'bb', label: 'Walks', group: 'Batting', get: sum('bat.walks'), alias: ['walks'] },
+    { id: 'batK', label: 'Strikeouts (batter)', group: 'Batting', get: sum('bat.strikeouts'), alias: ['strikeouts', 'ks'] },
+    { id: 'pK', label: 'Strikeouts', group: 'Pitching', pitcher: true, get: sum('pit.strikeouts'), alias: ['strikeouts', 'ks', 'k'] },
+    { id: 'outs', label: 'Outs recorded', group: 'Pitching', pitcher: true, get: sum('pit.outs'), alias: ['outs recorded', 'outs'] },
+    { id: 'pH', label: 'Hits allowed', group: 'Pitching', pitcher: true, get: sum('pit.hits'), alias: ['hits allowed', 'hits'] },
+    { id: 'er', label: 'Earned runs', group: 'Pitching', pitcher: true, get: sum('pit.earnedRuns'), alias: ['earned runs', 'er'] },
+    { id: 'pBB', label: 'Walks allowed', group: 'Pitching', pitcher: true, get: sum('pit.walks'), alias: ['walks allowed', 'walks'] },
+  ],
+};
+const statOf = p => STATS[p.league].find(s => s.id === p.stat);
+
+const STORE = 'propboard.v1';
+const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
+const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+
+let props = load(STORE, []);
+let filter = 'all';
+let editing = null;
+const games = {};
+const lookups = {};
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const persist = () => save(STORE, props);
+const ymd = d => `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+const initials = n => n.split(' ').map(w => w[0]).slice(0, 2).join('');
+const fmt = v => Number.isInteger(v) ? String(v) : v.toFixed(1);
+
+async function getJSON(url) {
+  const r = await fetch(url, { cache: 'no-store' });
+  if (!r.ok) throw new Error(r.status);
+  return r.json();
+}
+
+/* ---------- search ---------- */
+const allAliases = [...new Set(Object.values(STATS).flat().flatMap(s => s.alias))].sort((a, b) => b.length - a.length);
+
+function parseQuery(raw) {
+  let q = ' ' + raw.toLowerCase().replace(/[+]/g, ' + ') + ' ';
+  let side = null;
+  if (/\s(under|u)\s/.test(q)) side = 'under';
+  else if (/\s(over|o)\s/.test(q)) side = 'over';
+  const num = q.match(/\s(\d+(?:\.\d+)?)\s/);
+  const line = num ? parseFloat(num[1]) : null;
+  let rest = q.replace(/\s(under|over|u|o)\s/g, ' ').replace(/\s\d+(\.\d+)?\s/g, ' ');
+  for (const a of allAliases) {
+    rest = rest.replace(new RegExp(`\\s${a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=\\s)`, 'g'), ' ');
+  }
+  return { name: rest.replace(/\s+/g, ' ').trim(), side, line, raw: q };
+}
+
+function guessStat(league, raw, isPitcher) {
+  let best = null;
+  for (const s of STATS[league]) {
+    for (const a of s.alias) {
+      if (!new RegExp(`(^|\\s)${a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`).test(raw.trim())) continue;
+      const score = a.length + (league === 'mlb' && !!s.pitcher === isPitcher ? 100 : 0);
+      if (!best || score > best.score) best = { id: s.id, score };
+    }
+  }
+  return best?.id ?? null;
+}
+
+let searchSeq = 0, searchTimer = null, results = [], activeIdx = 0, draft = null;
+
+$('#q').addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(runSearch, 180);
+});
+$('#q').addEventListener('keydown', e => {
+  const box = $('#results');
+  if (!box.classList.contains('open')) {
+    if (e.key === 'Enter' && draft) addDraft();
+    return;
+  }
+  if (e.key === 'ArrowDown') { activeIdx = Math.min(activeIdx + 1, results.length - 1); paintResults(); e.preventDefault(); }
+  else if (e.key === 'ArrowUp') { activeIdx = Math.max(activeIdx - 1, 0); paintResults(); e.preventDefault(); }
+  else if (e.key === 'Enter' && results[activeIdx]) { pickPlayer(results[activeIdx]); e.preventDefault(); }
+  else if (e.key === 'Escape') box.classList.remove('open');
+});
+document.addEventListener('click', e => { if (!e.target.closest('.search')) $('#results').classList.remove('open'); });
+
+async function runSearch() {
+  const parsed = parseQuery($('#q').value);
+  const box = $('#results');
+  if (parsed.name.length < 2) { box.classList.remove('open'); return; }
+  const seq = ++searchSeq;
+  try {
+    const d = await getJSON(`${SEARCH}?query=${encodeURIComponent(parsed.name)}&limit=25&type=player`);
+    if (seq !== searchSeq) return;
+    results = (d.items || []).filter(i => LEAGUES[i.league] && i.isActive !== false).slice(0, 7).map(i => {
+      const team = i.teamRelationships?.[0]?.core;
+      return {
+        athleteId: i.id, name: i.displayName, league: i.league,
+        position: i.position?.abbreviation || '',
+        headshot: i.headshot?.href || '',
+        teamId: team?.id || '', teamAbbr: team?.abbreviation || '', teamName: team?.displayName || '',
+        logo: team?.logos?.[0]?.href || '',
+      };
+    });
+    activeIdx = 0;
+    paintResults();
+  } catch { results = []; paintResults(); }
+}
+
+function avatar(p, size = 40) {
+  return `<div class="avatar" style="width:${size}px;height:${size}px">${p.headshot ? `<img src="${esc(p.headshot)}" alt="" loading="lazy" onerror="this.remove()">` : ''}${p.headshot ? '' : esc(initials(p.name))}</div>`;
+}
+
+function paintResults() {
+  const box = $('#results');
+  box.classList.add('open');
+  if (!results.length) { box.innerHTML = '<div class="empty">No NFL, NBA or MLB players found</div>'; return; }
+  box.innerHTML = results.map((r, i) => `
+    <button class="result ${i === activeIdx ? 'active' : ''}" data-i="${i}">
+      ${avatar(r, 34)}
+      <div><div><b>${esc(r.name)}</b></div><div class="meta">${LEAGUES[r.league].label} · ${esc(r.teamName || 'Free agent')} · ${esc(r.position)}</div></div>
+    </button>`).join('');
+  box.querySelectorAll('.result').forEach(b => b.onclick = () => pickPlayer(results[+b.dataset.i]));
+}
+
+function pickPlayer(r) {
+  const parsed = parseQuery($('#q').value);
+  const isPitcher = /^(P|SP|RP)$/.test(r.position);
+  draft = {
+    ...r,
+    stat: guessStat(r.league, parsed.raw, isPitcher) || (r.league === 'mlb' && isPitcher ? 'pK' : STATS[r.league][0].id),
+    line: parsed.line ?? '',
+    side: parsed.side || 'over',
+  };
+  $('#results').classList.remove('open');
+  paintComposer();
+  const li = $('#lineInput');
+  if (li && draft.line === '') li.focus();
+}
+
+function paintComposer() {
+  const c = $('#composer');
+  if (!draft) { c.classList.remove('open'); c.innerHTML = ''; return; }
+  c.classList.add('open');
+  const groups = {};
+  STATS[draft.league].forEach(s => (groups[s.group || ''] ||= []).push(s));
+  c.innerHTML = `
+    <div class="who">
+      ${avatar(draft)}
+      <div><div class="name">${esc(draft.name)}</div><div class="meta">${LEAGUES[draft.league].label} · ${esc(draft.teamName)} · ${esc(draft.position)}</div></div>
+      <button class="tool x" id="closeDraft" aria-label="Cancel">${ICON.x}</button>
+    </div>
+    <div class="chips">${Object.entries(groups).map(([g, list]) =>
+      (g ? `<div class="chip-group-label">${g}</div>` : '') +
+      list.map(s => `<button class="chip ${s.id === draft.stat ? 'on' : ''}" data-stat="${s.id}">${s.label}</button>`).join('')
+    ).join('')}</div>
+    <div class="row">
+      <div class="seg" id="sideSeg">
+        <button data-side="over" class="${draft.side === 'over' ? 'on' : ''}">Over</button>
+        <button data-side="under" class="${draft.side === 'under' ? 'on' : ''}">Under</button>
+      </div>
+      <input class="num-input" id="lineInput" type="number" step="0.5" min="0" inputmode="decimal" placeholder="Line" value="${draft.line}">
+      <button class="primary" id="addBtn">Add to board</button>
+    </div>`;
+  c.querySelectorAll('[data-stat]').forEach(b => b.onclick = () => { draft.stat = b.dataset.stat; paintComposer(); });
+  c.querySelectorAll('[data-side]').forEach(b => b.onclick = () => { draft.side = b.dataset.side; paintComposer(); });
+  const li = $('#lineInput');
+  li.oninput = () => { draft.line = li.value; $('#addBtn').disabled = li.value === ''; };
+  li.onkeydown = e => { if (e.key === 'Enter') addDraft(); };
+  $('#addBtn').disabled = draft.line === '';
+  $('#addBtn').onclick = addDraft;
+  $('#closeDraft').onclick = () => { draft = null; paintComposer(); };
+}
+
+function addDraft() {
+  if (!draft || draft.line === '' || isNaN(parseFloat(draft.line))) { $('#lineInput')?.focus(); return; }
+  const p = {
+    id: Math.random().toString(36).slice(2, 10),
+    league: draft.league, athleteId: draft.athleteId, name: draft.name, position: draft.position,
+    headshot: draft.headshot, teamId: draft.teamId, teamAbbr: draft.teamAbbr, logo: draft.logo,
+    stat: draft.stat, line: parseFloat(draft.line), side: draft.side,
+    note: '', pin: '', eventId: null, added: Date.now(),
+  };
+  props.unshift(p);
+  persist();
+  draft = null;
+  $('#q').value = '';
+  paintComposer();
+  render();
+  refresh();
+}
+
+/* ---------- live data ---------- */
+function flatten(summary) {
+  const out = {};
+  for (const team of summary.boxscore?.players || []) {
+    for (const grp of team.statistics || []) {
+      const keys = grp.keys || [];
+      const g = grp.name || (keys.includes('atBats') ? 'bat' : keys.includes('fullInnings.partInnings') ? 'pit' : 'box');
+      for (const a of grp.athletes || []) {
+        const s = out[a.athlete.id] ||= {};
+        keys.forEach((k, i) => {
+          const v = a.stats?.[i];
+          if (v == null) return;
+          if (k === 'fullInnings.partInnings') {
+            const [f, part] = String(v).split('.');
+            s[`${g}.outs`] = (s[`${g}.outs`] || 0) + (+f || 0) * 3 + (+part || 0);
+            return;
+          }
+          const ks = k.split(/[\/-]/), vs = String(v).split(/[\/-]/);
+          if (ks.length > 1 && vs.length === ks.length) ks.forEach((kk, j) => s[`${g}.${kk}`] = (s[`${g}.${kk}`] || 0) + (parseFloat(vs[j]) || 0));
+          else s[`${g}.${k}`] = (s[`${g}.${k}`] || 0) + (parseFloat(v) || 0);
+        });
+      }
+    }
+  }
+  // MLB box has no doubles/triples, so total bases come from the pitch-by-pitch hit types.
+  const tbFor = t => t === 'home-run' ? 4 : /triple(?!-play)/.test(t) ? 3 : /double(?!-play)/.test(t) ? 2 : /single/.test(t) ? 1 : 0;
+  for (const pl of summary.plays || []) {
+    if (pl.summaryType !== 'P') continue;
+    const tb = tbFor(pl.type?.type || '');
+    if (!tb) continue;
+    const batter = pl.participants?.find(x => x.type === 'batter')?.athlete?.id;
+    if (batter) { const s = out[batter] ||= {}; s['bat.totalBases'] = (s['bat.totalBases'] || 0) + tb; }
+  }
+  return out;
+}
+
+function gameInfo(summary) {
+  const comp = summary.header?.competitions?.[0];
+  if (!comp) return null;
+  const st = comp.status?.type || {};
+  const teams = (comp.competitors || []).map(c => ({ id: c.team?.id, abbr: c.team?.abbreviation, score: c.score, home: c.homeAway === 'home' }));
+  return { state: st.state, completed: st.completed, detail: st.shortDetail || st.detail || '', date: comp.date, teams };
+}
+
+async function findEvent(p) {
+  const L = LEAGUES[p.league];
+  const today = new Date();
+  // NFL's default scoreboard is the whole current week; NBA and MLB are per day.
+  const urls = p.league === 'nfl' ? [`${SITE}${L.path}/scoreboard`]
+    : [0, 1, 2].map(o => `${SITE}${L.path}/scoreboard?dates=${ymd(new Date(today.getTime() + o * 864e5))}`);
+  for (const u of urls) {
+    const d = await getJSON(u);
+    const ev = (d.events || []).find(e => e.competitions?.[0]?.competitors?.some(c => c.team?.id === p.teamId) && e.status?.type?.state !== 'post')
+      || (d.events || []).find(e => e.competitions?.[0]?.competitors?.some(c => c.team?.id === p.teamId));
+    if (ev) return ev.id;
+  }
+  return null;
+}
+
+let refreshing = false;
+async function refresh() {
+  if (refreshing) return;
+  refreshing = true;
+  try {
+    for (const p of props) {
+      if (p.eventId || !p.teamId) continue;
+      const last = lookups[p.id] || 0;
+      if (Date.now() - last < 5 * 60e3) continue;
+      lookups[p.id] = Date.now();
+      try { p.eventId = await findEvent(p); if (p.eventId) persist(); } catch {}
+    }
+    const need = new Map();
+    for (const p of props) {
+      if (!p.eventId) continue;
+      const g = games[p.eventId];
+      if (g?.info?.completed && g.final) continue;
+      need.set(p.eventId, p.league);
+    }
+    await Promise.all([...need].map(async ([eid, league]) => {
+      try {
+        const s = await getJSON(`${SITE}${LEAGUES[league].path}/summary?event=${eid}`);
+        const info = gameInfo(s);
+        games[eid] = { info, stats: flatten(s), final: info?.completed, at: Date.now() };
+      } catch {}
+    }));
+    $('#updated').textContent = 'Updated ' + new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+  } finally {
+    refreshing = false;
+    render();
+  }
+}
+
+/* ---------- evaluation ---------- */
+function evaluate(p) {
+  const g = p.eventId ? games[p.eventId] : null;
+  const stat = statOf(p);
+  if (!g?.info) return { status: p.eventId ? 'loading' : (p.teamId ? 'nogame' : 'noteam'), value: 0 };
+  const s = g.stats[p.athleteId];
+  const value = s ? stat.get(s) : 0;
+  const { state, completed } = g.info;
+  let status = state === 'pre' ? 'pre' : state === 'in' ? 'live' : 'final';
+  if (p.side === 'over') {
+    if (value > p.line) status = 'won';
+    else if (completed) status = value === p.line ? 'push' : 'lost';
+  } else {
+    if (value > p.line) status = 'lost';
+    else if (completed) status = value === p.line ? 'push' : 'won';
+  }
+  if (completed && !s) status = 'dnp';
+  return { status, value, g, played: !!s };
+}
+
+/* ---------- render ---------- */
+const ICON = {
+  x: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+  edit: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>',
+  grip: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>',
+};
+const FILTERS = [
+  ['all', 'All'], ['live', 'Live'], ['pre', 'Upcoming'], ['won', 'Hit'], ['lost', 'Missed'],
+];
+const bucket = st => st === 'won' ? 'won' : (st === 'lost' || st === 'push' || st === 'dnp') ? 'lost' : st === 'live' ? 'live' : 'pre';
+
+function pill(ev, p) {
+  const g = ev.g?.info;
+  switch (ev.status) {
+    case 'won': return `<span class="pill won">${g && !g.completed ? 'Hit' : 'Won'}</span>`;
+    case 'lost': return `<span class="pill lost">${g && !g.completed ? 'Dead' : 'Lost'}</span>`;
+    case 'push': return '<span class="pill push">Push</span>';
+    case 'dnp': return '<span class="pill push">DNP</span>';
+    case 'live': return `<span class="pill live">${esc(g.detail)}</span>`;
+    case 'pre': return `<span class="pill">${g?.date ? new Date(g.date).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' }) : 'Upcoming'}</span>`;
+    case 'nogame': return '<span class="pill">No game found</span>';
+    case 'noteam': return '<span class="pill">No team</span>';
+    default: return '<span class="pill">Loading</span>';
+  }
+}
+
+function gameLine(ev, p) {
+  const g = ev.g?.info;
+  if (!g) return '';
+  const away = g.teams.find(t => !t.home), home = g.teams.find(t => t.home);
+  if (!away || !home) return '';
+  const sc = g.state === 'pre' ? '' : ` ${away.score}`;
+  const sh = g.state === 'pre' ? '' : ` ${home.score}`;
+  const status = g.state === 'post' ? ' · Final' : '';
+  return `${esc(away.abbr)}${sc} @ ${esc(home.abbr)}${sh}${status}`;
+}
+
+const lastValues = {};
+function card(p) {
+  const ev = evaluate(p);
+  const stat = statOf(p);
+  const max = Math.max(p.line * 1.4, ev.value * 1.05, p.line + 1);
+  const pct = Math.min(100, ev.value / max * 100);
+  const mark = p.line / max * 100;
+  const cls = ['won', 'lost', 'push'].includes(ev.status) ? ev.status : ev.status === 'dnp' ? 'push' : '';
+  const need = p.side === 'over' && ev.status === 'live' ? Math.floor(p.line) + 1 - ev.value : null;
+  const room = p.side === 'under' && ev.status === 'live' ? Math.floor(p.line) - ev.value : null;
+  const bumped = lastValues[p.id] != null && lastValues[p.id] !== ev.value;
+  lastValues[p.id] = ev.value;
+  const isEditing = editing === p.id;
+  return `
+  <article class="card ${cls}" data-id="${p.id}" draggable="true" style="--pin:${p.pin || 'transparent'}">
+    <div class="card-head">
+      ${avatar(p)}
+      <div style="min-width:0">
+        <div class="name">${esc(p.name)}</div>
+        <div class="team">${p.logo ? `<img src="${esc(p.logo)}" alt="">` : ''}${esc(p.teamAbbr)} · ${LEAGUES[p.league].label}</div>
+      </div>
+      <div class="tools">
+        <button class="tool" data-act="edit" title="Edit" aria-label="Edit">${ICON.edit}</button>
+        <button class="tool" data-act="remove" title="Remove" aria-label="Remove">${ICON.x}</button>
+        <span class="tool grip" title="Drag to reorder">${ICON.grip}</span>
+      </div>
+    </div>
+    <div class="prop-line"><span class="side ${p.side}">${p.side} ${fmt(p.line)}</span><span class="stat">${esc(stat.label)}</span></div>
+    <div class="big">
+      <span class="val mono ${bumped ? 'bump' : ''}">${fmt(ev.value)}</span><span class="of mono">/ ${fmt(p.line)}</span>
+      ${need != null ? `<span class="need">${need} to go</span>` : room != null ? `<span class="need">${room} to spare</span>` : ''}
+    </div>
+    <div class="bar"><div class="fill" style="width:${pct}%"></div><div class="mark" style="left:${mark}%"></div></div>
+    ${p.note && !isEditing ? `<div class="note">${esc(p.note)}</div>` : ''}
+    <div class="foot"><span class="game">${gameLine(ev, p)}</span>${pill(ev, p)}</div>
+    ${isEditing ? `
+    <div class="editor">
+      <div class="row">
+        <div class="seg">
+          <button data-side="over" class="${p.side === 'over' ? 'on' : ''}">Over</button>
+          <button data-side="under" class="${p.side === 'under' ? 'on' : ''}">Under</button>
+        </div>
+        <input class="num-input" data-field="line" type="number" step="0.5" min="0" value="${p.line}">
+      </div>
+      <select data-field="stat">${STATS[p.league].map(s => `<option value="${s.id}" ${s.id === p.stat ? 'selected' : ''}>${s.label}</option>`).join('')}</select>
+      <textarea data-field="note" placeholder="Note">${esc(p.note)}</textarea>
+      <div class="row">
+        <div class="swatches">${PINS.map(c => `<button class="swatch ${c ? '' : 'none'} ${c === (p.pin || '') ? 'on' : ''}" data-pin="${c}" style="${c ? `background:${c}` : ''}" aria-label="Color"></button>`).join('')}</div>
+        <div class="spacer" style="flex:1"></div>
+        <button class="ghost" data-act="done">Done</button>
+      </div>
+    </div>` : ''}
+  </article>`;
+}
+
+function render() {
+  const evs = props.map(p => [p, evaluate(p)]);
+  const counts = { all: props.length, live: 0, pre: 0, won: 0, lost: 0 };
+  evs.forEach(([, e]) => counts[bucket(e.status)]++);
+  $('#filters').innerHTML = FILTERS.map(([k, l]) => `<button data-f="${k}" class="${filter === k ? 'on' : ''}">${l}${counts[k] ? ` <span class="mono" style="opacity:.6">${counts[k]}</span>` : ''}</button>`).join('');
+  $('#filters').querySelectorAll('button').forEach(b => b.onclick = () => { filter = b.dataset.f; render(); });
+  $('#liveDot').classList.toggle('idle', !counts.live);
+  $('#clearSettled').style.display = counts.won + counts.lost ? '' : 'none';
+
+  // Don't rebuild a card mid-typing; the next poll would wipe the cursor.
+  const active = document.activeElement;
+  if (active?.closest?.('.editor')) {
+    evs.forEach(([p]) => { if (p.id !== editing) { const el = document.querySelector(`.card[data-id="${p.id}"]`); if (el) el.outerHTML = card(p); } });
+    wireCards();
+    return;
+  }
+  const shown = evs.filter(([, e]) => filter === 'all' || bucket(e.status) === filter);
+  $('#board').innerHTML = shown.length ? shown.map(([p]) => card(p)).join('')
+    : `<div class="empty-board">${props.length ? '<b>Nothing here</b>' : '<b>No props yet</b>Search a player above to pin a prop.'}</div>`;
+  wireCards();
+}
+
+function wireCards() {
+  document.querySelectorAll('.card').forEach(el => {
+    const p = props.find(x => x.id === el.dataset.id);
+    if (!p || el.dataset.wired) return;
+    el.dataset.wired = 1;
+    el.querySelector('[data-act="remove"]').onclick = () => { props = props.filter(x => x !== p); persist(); render(); };
+    el.querySelector('[data-act="edit"]').onclick = () => { editing = editing === p.id ? null : p.id; render(); };
+    el.querySelector('[data-act="done"]')?.addEventListener('click', () => { editing = null; render(); });
+    el.querySelectorAll('.editor [data-side]').forEach(b => b.onclick = () => { p.side = b.dataset.side; persist(); render(); });
+    el.querySelectorAll('[data-pin]').forEach(b => b.onclick = () => { p.pin = b.dataset.pin; persist(); render(); });
+    el.querySelector('[data-field="line"]')?.addEventListener('change', e => { const v = parseFloat(e.target.value); if (!isNaN(v)) { p.line = v; persist(); render(); } });
+    el.querySelector('[data-field="stat"]')?.addEventListener('change', e => { p.stat = e.target.value; persist(); render(); });
+    el.querySelector('[data-field="note"]')?.addEventListener('input', e => { p.note = e.target.value; persist(); });
+
+    el.addEventListener('dragstart', e => {
+      if (e.target.closest('.editor')) { e.preventDefault(); return; }
+      el.classList.add('dragging'); e.dataTransfer.setData('text/plain', p.id); e.dataTransfer.effectAllowed = 'move';
+    });
+    el.addEventListener('dragend', () => { el.classList.remove('dragging'); document.querySelectorAll('.drop-before').forEach(x => x.classList.remove('drop-before')); });
+    el.addEventListener('dragover', e => { e.preventDefault(); el.classList.add('drop-before'); });
+    el.addEventListener('dragleave', () => el.classList.remove('drop-before'));
+    el.addEventListener('drop', e => {
+      e.preventDefault();
+      const from = props.findIndex(x => x.id === e.dataTransfer.getData('text/plain'));
+      if (from < 0 || props[from] === p) return;
+      const [moved] = props.splice(from, 1);
+      props.splice(props.indexOf(p), 0, moved);
+      persist(); render();
+    });
+  });
+}
+
+$('#clearSettled').onclick = () => {
+  props = props.filter(p => !['won', 'lost'].includes(bucket(evaluate(p).status)));
+  persist(); render();
+};
+$('#refreshBtn').onclick = () => refresh();
+
+const THEME = 'propboard.theme';
+const applyTheme = t => t ? document.documentElement.setAttribute('data-theme', t) : document.documentElement.removeAttribute('data-theme');
+applyTheme(load(THEME, ''));
+$('#themeBtn').onclick = () => {
+  const dark = document.documentElement.dataset.theme ? document.documentElement.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  const t = dark ? 'light' : 'dark';
+  save(THEME, t); applyTheme(t);
+};
+
+render();
+refresh();
+setInterval(() => { if (!document.hidden) refresh(); }, POLL_MS);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+</script>
+</body>
+</html>
