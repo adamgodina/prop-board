@@ -65,6 +65,17 @@ header.top { display: flex; align-items: center; gap: 16px; margin-bottom: 20px;
 .updated { color: var(--faint); font-size: 12px; }
 .icon-btn { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; width: 36px; height: 36px; display: grid; place-items: center; }
 .icon-btn:hover { border-color: var(--faint); }
+#syncBtn[data-state="ok"] { color: var(--win); }
+#syncBtn[data-state="busy"] { color: var(--accent); }
+#syncBtn[data-state="error"] { color: var(--loss); border-color: var(--loss); }
+.sync-panel { display: none; margin: -8px 0 16px auto; max-width: 420px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px; box-shadow: var(--shadow); }
+.sync-panel.open { display: block; }
+.sync-panel h3 { margin: 0 0 4px; font-size: 15px; }
+.sync-panel p { margin: 0 0 12px; color: var(--muted); font-size: 13px; }
+.sync-panel a { color: var(--accent); }
+.sync-panel input { width: 100%; height: 38px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); padding: 0 12px; outline: 0; margin-bottom: 10px; font-family: "JetBrains Mono", monospace; font-size: 12px; }
+.sync-panel input:focus { border-color: var(--accent); }
+.sync-panel .err { color: var(--loss); font-size: 12px; margin: 0 0 10px; }
 
 /* search + composer */
 .search { position: relative; }
@@ -195,6 +206,9 @@ header.top { display: flex; align-items: center; gap: 16px; margin-bottom: 20px;
     <div class="brand"><span class="dot idle" id="liveDot"></span>Prop Board</div>
     <div class="spacer"></div>
     <span class="updated mono" id="updated"></span>
+    <button class="icon-btn" id="syncBtn" title="Sync" aria-label="Sync">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18a5 5 0 0 1-.6-9.96A6 6 0 0 1 18 9a4.5 4.5 0 0 1-.5 9z"/></svg>
+    </button>
     <button class="icon-btn" id="refreshBtn" title="Refresh now" aria-label="Refresh now">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
     </button>
@@ -202,6 +216,8 @@ header.top { display: flex; align-items: center; gap: 16px; margin-bottom: 20px;
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg>
     </button>
   </header>
+
+  <div class="sync-panel" id="syncPanel"></div>
 
   <div class="search">
     <div class="search-box">
@@ -301,7 +317,13 @@ const lookups = {};
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const persist = () => save(STORE, props);
+let boardUpdated = load('propboard.updated', 0);
+const persist = () => {
+  boardUpdated = Date.now();
+  save(STORE, props);
+  save('propboard.updated', boardUpdated);
+  schedulePush();
+};
 const ymd = d => `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
 const initials = n => n.split(' ').map(w => w[0]).slice(0, 2).join('');
 const fmt = v => Number.isInteger(v) ? String(v) : v.toFixed(1);
@@ -739,10 +761,136 @@ $('#themeBtn').onclick = () => {
   save(THEME, t); applyTheme(t);
 };
 
+/* ---------- sync (private GitHub Gist) ---------- */
+const GH = 'https://api.github.com';
+const GIST_FILE = 'prop-board.json';
+let sync = load('propboard.sync', null);
+let gistEtag = null, pushTimer = null, pushing = false, lastSynced = null, syncError = '', syncBusy = false;
+
+function gh(path, opts = {}, token = sync?.token) {
+  return fetch(GH + path, {
+    ...opts, cache: 'no-store',
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', ...(opts.headers || {}) },
+  });
+}
+const boardJSON = () => JSON.stringify({ updated: boardUpdated, props }, null, 1);
+
+function setSyncState() {
+  const b = $('#syncBtn');
+  b.dataset.state = !sync ? 'off' : syncError ? 'error' : (syncBusy || pushTimer || pushing) ? 'busy' : 'ok';
+  b.title = !sync ? 'Sync' : syncError || 'Synced';
+  if ($('#syncPanel').classList.contains('open')) paintSyncPanel();
+}
+
+function failSync(r) {
+  syncError = r.status === 401 ? 'Token rejected' : r.status === 404 ? 'Gist not found' : r.status === 403 ? 'GitHub rate limit' : `Sync failed (${r.status})`;
+  setSyncState();
+}
+
+async function pull() {
+  if (!sync?.gistId || pushTimer || pushing) return;
+  try {
+    const r = await gh(`/gists/${sync.gistId}`, { headers: gistEtag ? { 'If-None-Match': gistEtag } : {} });
+    if (r.status === 304) { lastSynced = Date.now(); syncError = ''; return setSyncState(); }
+    if (!r.ok) return failSync(r);
+    gistEtag = r.headers.get('ETag');
+    const d = await r.json();
+    const remote = JSON.parse(d.files?.[GIST_FILE]?.content || '{}');
+    syncError = ''; lastSynced = Date.now();
+    // Never clobber a card being typed into, or a change still waiting to push.
+    if (remote.updated > boardUpdated && !pushTimer && !pushing && !document.activeElement?.closest?.('.editor')) {
+      props = remote.props || [];
+      boardUpdated = remote.updated;
+      save(STORE, props); save('propboard.updated', boardUpdated);
+      render();
+    }
+  } catch { syncError = 'Offline'; }
+  setSyncState();
+}
+
+async function push() {
+  if (!sync?.gistId) return;
+  pushing = true; setSyncState();
+  try {
+    const r = await gh(`/gists/${sync.gistId}`, { method: 'PATCH', body: JSON.stringify({ files: { [GIST_FILE]: { content: boardJSON() } } }) });
+    if (!r.ok) failSync(r); else { syncError = ''; lastSynced = Date.now(); gistEtag = null; }
+  } catch { syncError = 'Offline'; }
+  pushing = false; setSyncState();
+}
+
+function schedulePush() {
+  if (!sync?.gistId) return;
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(() => { pushTimer = null; push(); }, 700);
+  setSyncState();
+}
+
+async function connectSync(token) {
+  syncBusy = true; syncError = ''; setSyncState();
+  try {
+    const list = await gh('/gists?per_page=100', {}, token);
+    if (!list.ok) return failSync(list);
+    const found = (await list.json()).find(g => g.files?.[GIST_FILE]);
+    let gistId;
+    if (found) {
+      gistId = found.id;
+      const full = await (await gh(`/gists/${gistId}`, {}, token)).json();
+      const remote = JSON.parse(full.files?.[GIST_FILE]?.content || '{}');
+      // First connect on a device keeps both boards: remote cards first, then any local-only ones.
+      const ids = new Set((remote.props || []).map(p => p.id));
+      const extra = props.filter(p => !ids.has(p.id));
+      props = [...(remote.props || []), ...extra];
+      sync = { token, gistId };
+      save('propboard.sync', sync);
+      if (extra.length) persist();
+      else { boardUpdated = remote.updated || Date.now(); save(STORE, props); save('propboard.updated', boardUpdated); }
+    } else {
+      const r = await gh('/gists', { method: 'POST', body: JSON.stringify({ description: 'Prop Board', public: false, files: { [GIST_FILE]: { content: boardJSON() } } }) }, token);
+      if (!r.ok) return failSync(r);
+      gistId = (await r.json()).id;
+      sync = { token, gistId };
+      save('propboard.sync', sync);
+    }
+    lastSynced = Date.now();
+    render(); refresh();
+  } catch { syncError = 'Offline'; }
+  finally { syncBusy = false; setSyncState(); }
+}
+
+function paintSyncPanel() {
+  const el = $('#syncPanel');
+  if (sync) {
+    el.innerHTML = `
+      <h3>${syncError ? esc(syncError) : 'Synced'}</h3>
+      <p>${lastSynced ? 'Last synced ' + new Date(lastSynced).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }) : 'Connecting'}</p>
+      <div class="row"><button class="ghost" id="syncOff">Disconnect this device</button></div>`;
+    $('#syncOff').onclick = () => { sync = null; save('propboard.sync', null); syncError = ''; el.classList.remove('open'); setSyncState(); };
+    return;
+  }
+  const typed = $('#tokenInput')?.value || '';
+  el.innerHTML = `
+    <h3>Sync devices</h3>
+    <p>Paste a GitHub token with gist access. Use the same token on each device. <a href="https://github.com/settings/tokens/new?scopes=gist&description=Prop%20Board" target="_blank" rel="noopener">Create one</a></p>
+    ${syncError ? `<p class="err">${esc(syncError)}</p>` : ''}
+    <input id="tokenInput" type="password" autocomplete="off" placeholder="ghp_..." value="${esc(typed)}">
+    <button class="primary" id="syncGo" ${syncBusy ? 'disabled' : ''}>${syncBusy ? 'Connecting' : 'Connect'}</button>`;
+  const go = () => { const t = $('#tokenInput').value.trim(); if (t) connectSync(t); };
+  $('#syncGo').onclick = go;
+  $('#tokenInput').onkeydown = e => { if (e.key === 'Enter') go(); };
+}
+
+$('#syncBtn').onclick = () => {
+  const el = $('#syncPanel');
+  el.classList.toggle('open');
+  if (el.classList.contains('open')) { paintSyncPanel(); $('#tokenInput')?.focus(); }
+};
+
 render();
-refresh();
+setSyncState();
+pull().then(refresh);
 setInterval(() => { if (!document.hidden) refresh(); }, POLL_MS);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+setInterval(() => { if (!document.hidden) pull(); }, 5000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) pull().then(refresh); });
 </script>
 </body>
 </html>
