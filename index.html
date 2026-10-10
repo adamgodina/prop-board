@@ -244,6 +244,7 @@ const LEAGUES = {
   nfl: { path: 'football/nfl', label: 'NFL' },
   nba: { path: 'basketball/nba', label: 'NBA' },
   mlb: { path: 'baseball/mlb', label: 'MLB' },
+  nhl: { path: 'hockey/nhl', label: 'NHL' },
 };
 const SITE = 'https://site.api.espn.com/apis/site/v2/sports/';
 const SEARCH = 'https://site.web.api.espn.com/apis/common/v3/search';
@@ -302,6 +303,17 @@ const STATS = {
     { id: 'er', label: 'Earned runs', group: 'Pitching', pitcher: true, get: sum('pit.earnedRuns'), alias: ['earned runs', 'er'] },
     { id: 'pBB', label: 'Walks allowed', group: 'Pitching', pitcher: true, get: sum('pit.walks'), alias: ['walks allowed', 'walks'] },
   ],
+  nhl: [
+    { id: 'goals', label: 'Goals', group: 'Skater', get: sum('sk.goals'), alias: ['anytime goal', 'goal scorer', 'goals', 'goal'] },
+    { id: 'hpts', label: 'Points', group: 'Skater', get: sum('sk.goals', 'sk.assists'), alias: ['points', 'pts'] },
+    { id: 'hast', label: 'Assists', group: 'Skater', get: sum('sk.assists'), alias: ['assists', 'ast'] },
+    { id: 'sog', label: 'Shots on goal', group: 'Skater', get: sum('sk.shotsTotal'), alias: ['shots on goal', 'sog', 'shots'] },
+    { id: 'hits', label: 'Hits', group: 'Skater', get: sum('sk.hits'), alias: ['hits'] },
+    { id: 'bs', label: 'Blocked shots', group: 'Skater', get: sum('sk.blockedShots'), alias: ['blocked shots', 'blocks'] },
+    { id: 'pim', label: 'Penalty minutes', group: 'Skater', get: sum('sk.penaltyMinutes'), alias: ['penalty minutes', 'pim'] },
+    { id: 'saves', label: 'Saves', group: 'Goalie', pitcher: true, get: sum('g.saves'), alias: ['saves'] },
+    { id: 'ga', label: 'Goals against', group: 'Goalie', pitcher: true, get: sum('g.goalsAgainst'), alias: ['goals against', 'goals allowed'] },
+  ],
 };
 const statOf = p => STATS[p.league].find(s => s.id === p.stat);
 
@@ -356,7 +368,7 @@ function guessStat(league, raw, isPitcher) {
   for (const s of STATS[league]) {
     for (const a of s.alias) {
       if (!new RegExp(`(^|\\s)${a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`).test(raw.trim())) continue;
-      const score = a.length + (league === 'mlb' && !!s.pitcher === isPitcher ? 100 : 0);
+      const score = a.length + (!!s.pitcher === isPitcher ? 100 : 0);
       if (!best || score > best.score) best = { id: s.id, score };
     }
   }
@@ -412,7 +424,7 @@ function avatar(p, size = 40) {
 function paintResults() {
   const box = $('#results');
   box.classList.add('open');
-  if (!results.length) { box.innerHTML = '<div class="empty">No NFL, NBA or MLB players found</div>'; return; }
+  if (!results.length) { box.innerHTML = '<div class="empty">No NFL, NBA, MLB or NHL players found</div>'; return; }
   box.innerHTML = results.map((r, i) => `
     <button class="result ${i === activeIdx ? 'active' : ''}" data-i="${i}">
       ${avatar(r, 34)}
@@ -423,10 +435,10 @@ function paintResults() {
 
 function pickPlayer(r) {
   const parsed = parseQuery($('#q').value);
-  const isPitcher = /^(P|SP|RP)$/.test(r.position);
+  const isPitcher = /^(P|SP|RP|G)$/.test(r.position);
   draft = {
     ...r,
-    stat: guessStat(r.league, parsed.raw, isPitcher) || (r.league === 'mlb' && isPitcher ? 'pK' : STATS[r.league][0].id),
+    stat: guessStat(r.league, parsed.raw, isPitcher) || (isPitcher ? (r.league === 'nhl' ? 'saves' : 'pK') : STATS[r.league][0].id),
     line: parsed.line ?? '',
     side: parsed.side || 'over',
   };
@@ -494,7 +506,7 @@ function flatten(summary) {
   for (const team of summary.boxscore?.players || []) {
     for (const grp of team.statistics || []) {
       const keys = grp.keys || [];
-      const g = grp.name || (keys.includes('atBats') ? 'bat' : keys.includes('fullInnings.partInnings') ? 'pit' : 'box');
+      const g = { forwards: 'sk', defenses: 'sk', goalies: 'g' }[grp.name] || grp.name || (keys.includes('atBats') ? 'bat' : keys.includes('fullInnings.partInnings') ? 'pit' : 'box');
       for (const a of grp.athletes || []) {
         const s = out[a.athlete.id] ||= {};
         keys.forEach((k, i) => {
