@@ -329,11 +329,22 @@ const lookups = {};
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-let boardUpdated = load('propboard.updated', 0);
+// Each prop carries its own edit time (u) and deletions leave tombstones, so a stale
+// device can only add to the shared board, never roll it back.
+const SYNC_KEYS = ['id', 'league', 'athleteId', 'name', 'position', 'headshot', 'teamId', 'teamAbbr', 'logo', 'stat', 'line', 'side', 'note', 'pin', 'added'];
+const sig = p => JSON.stringify(SYNC_KEYS.map(k => p[k]));
+let meta = load('propboard.meta', { deleted: {}, orderU: 0 });
+let sigs = {}, lastOrder = '';
+const resetSigs = () => { sigs = Object.fromEntries(props.map(p => [p.id, sig(p)])); lastOrder = props.map(p => p.id).join(); };
+resetSigs();
+const saveLocal = () => { save(STORE, props); save('propboard.meta', meta); };
 const persist = () => {
-  boardUpdated = Date.now();
-  save(STORE, props);
-  save('propboard.updated', boardUpdated);
+  const now = Date.now();
+  for (const p of props) if (sigs[p.id] !== sig(p)) p.u = now;
+  for (const id in sigs) if (!props.some(p => p.id === id)) meta.deleted[id] = now;
+  if (props.map(p => p.id).join() !== lastOrder) meta.orderU = now;
+  resetSigs();
+  saveLocal();
   schedulePush();
 };
 const ymd = d => `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
@@ -569,7 +580,8 @@ async function refresh() {
       const last = lookups[p.id] || 0;
       if (Date.now() - last < 5 * 60e3) continue;
       lookups[p.id] = Date.now();
-      try { p.eventId = await findEvent(p); if (p.eventId) persist(); } catch {}
+      // Every device finds the game itself, so this is not a board edit and never syncs.
+      try { p.eventId = await findEvent(p); if (p.eventId) saveLocal(); } catch {}
     }
     const need = new Map();
     for (const p of props) {
@@ -785,7 +797,59 @@ function gh(path, opts = {}, token = sync?.token) {
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', ...(opts.headers || {}) },
   });
 }
-const boardJSON = () => JSON.stringify({ updated: boardUpdated, props }, null, 1);
+const canon = (list, deleted, orderU) => JSON.stringify({
+  v: 2,
+  props: list.map(p => Object.fromEntries([...SYNC_KEYS, 'u'].map(k => [k, p[k] ?? null]))),
+  deleted: Object.fromEntries(Object.entries(deleted || {}).sort()),
+  orderU: orderU || 0,
+}, null, 1);
+const boardJSON = () => canon(props, meta.deleted, meta.orderU);
+
+function normalize(doc) {
+  if (doc?.v === 2) return doc;
+  const u = doc?.updated || 0;
+  return { props: (doc?.props || []).map(p => ({ ...p, u: p.u || u })), deleted: {}, orderU: u };
+}
+
+// Merges the gist into the local board in place (open editors keep their objects).
+function mergeIn(doc) {
+  const r = normalize(doc);
+  const before = boardJSON();
+  const deleted = { ...meta.deleted };
+  for (const [id, t] of Object.entries(r.deleted || {})) deleted[id] = Math.max(deleted[id] || 0, t);
+  const cutoff = Date.now() - 30 * 864e5;
+  for (const id in deleted) if (deleted[id] < cutoff) delete deleted[id];
+
+  const local = new Map(props.map(p => [p.id, p]));
+  const merged = new Map();
+  for (const rp of r.props) {
+    const lp = local.get(rp.id);
+    if (!lp) merged.set(rp.id, { ...rp });
+    else {
+      if ((rp.u || 0) > (lp.u || 0)) { const eid = lp.eventId; Object.assign(lp, rp); lp.eventId ||= eid; }
+      merged.set(rp.id, lp);
+    }
+  }
+  for (const lp of props) if (!merged.has(lp.id)) merged.set(lp.id, lp);
+  for (const [id, p] of merged) if ((deleted[id] || 0) >= (p.u || 0)) merged.delete(id);
+
+  const base = ((r.orderU || 0) > (meta.orderU || 0) ? r.props : props).map(p => p.id).filter(id => merged.has(id));
+  const rest = [...merged.keys()].filter(id => !base.includes(id)).sort((a, b) => (merged.get(b).added || 0) - (merged.get(a).added || 0));
+  props = [...rest, ...base].map(id => merged.get(id));
+  meta = { deleted, orderU: Math.max(meta.orderU || 0, r.orderU || 0) };
+  resetSigs();
+  saveLocal();
+  const after = boardJSON();
+  return { localChanged: after !== before, remoteStale: after !== canon(r.props, r.deleted, r.orderU) };
+}
+
+async function readGist(etag) {
+  const r = await gh(`/gists/${sync.gistId}`, { headers: etag ? { 'If-None-Match': etag } : {} });
+  if (r.status === 304) return { notModified: true };
+  if (!r.ok) return { error: r };
+  const d = await r.json();
+  return { etag: r.headers.get('ETag'), doc: JSON.parse(d.files?.[GIST_FILE]?.content || '{}') };
+}
 
 function setSyncState() {
   const b = $('#syncBtn');
@@ -802,30 +866,31 @@ function failSync(r) {
 async function pull() {
   if (!sync?.gistId || pushTimer || pushing) return;
   try {
-    const r = await gh(`/gists/${sync.gistId}`, { headers: gistEtag ? { 'If-None-Match': gistEtag } : {} });
-    if (r.status === 304) { lastSynced = Date.now(); syncError = ''; return setSyncState(); }
-    if (!r.ok) return failSync(r);
-    gistEtag = r.headers.get('ETag');
-    const d = await r.json();
-    const remote = JSON.parse(d.files?.[GIST_FILE]?.content || '{}');
+    const g = await readGist(gistEtag);
+    if (g.error) return failSync(g.error);
     syncError = ''; lastSynced = Date.now();
-    // Never clobber a card being typed into, or a change still waiting to push.
-    if (remote.updated > boardUpdated && !pushTimer && !pushing && !document.activeElement?.closest?.('.editor')) {
-      props = remote.props || [];
-      boardUpdated = remote.updated;
-      save(STORE, props); save('propboard.updated', boardUpdated);
-      render();
+    if (!g.notModified && !pushTimer && !pushing) {
+      gistEtag = g.etag;
+      const m = mergeIn(g.doc);
+      if (m.localChanged) render();
+      if (m.remoteStale) schedulePush();
     }
   } catch { syncError = 'Offline'; }
   setSyncState();
 }
 
+// Read, merge, then write, so a push never drops what another device just added.
 async function push() {
   if (!sync?.gistId) return;
   pushing = true; setSyncState();
   try {
-    const r = await gh(`/gists/${sync.gistId}`, { method: 'PATCH', body: JSON.stringify({ files: { [GIST_FILE]: { content: boardJSON() } } }) });
-    if (!r.ok) failSync(r); else { syncError = ''; lastSynced = Date.now(); gistEtag = null; }
+    const g = await readGist();
+    if (g.error) failSync(g.error);
+    else {
+      if (mergeIn(g.doc).localChanged) render();
+      const r = await gh(`/gists/${sync.gistId}`, { method: 'PATCH', body: JSON.stringify({ files: { [GIST_FILE]: { content: boardJSON() } } }) });
+      if (!r.ok) failSync(r); else { syncError = ''; lastSynced = Date.now(); gistEtag = null; }
+    }
   } catch { syncError = 'Offline'; }
   pushing = false; setSyncState();
 }
@@ -846,16 +911,11 @@ async function connectSync(token) {
     let gistId;
     if (found) {
       gistId = found.id;
-      const full = await (await gh(`/gists/${gistId}`, {}, token)).json();
-      const remote = JSON.parse(full.files?.[GIST_FILE]?.content || '{}');
-      // First connect on a device keeps both boards: remote cards first, then any local-only ones.
-      const ids = new Set((remote.props || []).map(p => p.id));
-      const extra = props.filter(p => !ids.has(p.id));
-      props = [...(remote.props || []), ...extra];
       sync = { token, gistId };
       save('propboard.sync', sync);
-      if (extra.length) persist();
-      else { boardUpdated = remote.updated || Date.now(); save(STORE, props); save('propboard.updated', boardUpdated); }
+      const g = await readGist();
+      if (g.error) return failSync(g.error);
+      if (mergeIn(g.doc).remoteStale) schedulePush();
     } else {
       const r = await gh('/gists', { method: 'POST', body: JSON.stringify({ description: 'Prop Board', public: false, files: { [GIST_FILE]: { content: boardJSON() } } }) }, token);
       if (!r.ok) return failSync(r);
