@@ -503,6 +503,7 @@ function addDraft() {
     note: '', pin: '', eventId: null, added: Date.now(),
   };
   props.unshift(p);
+  filter = 'all';
   persist();
   draft = null;
   $('#q').value = '';
@@ -716,8 +717,19 @@ function card(p) {
   </article>`;
 }
 
+const safeEval = p => { try { return evaluate(p); } catch (e) { return { status: 'error', value: 0, error: e }; } };
+// A card that fails to draw still shows, with its error and a working remove button.
+function safeCard(p) {
+  try { return card(p); } catch (e) {
+    return `<article class="card lost" data-id="${esc(p.id)}">
+      <div class="card-head"><div class="name">${esc(p.name || 'Unknown prop')}</div>
+      <div class="tools"><button class="tool" data-act="remove" title="Remove" aria-label="Remove">${ICON.x}</button></div></div>
+      <div class="note">${esc(p.league)} ${esc(p.stat)} ${esc(p.line)}: ${esc(e.message)}</div></article>`;
+  }
+}
+
 function render() {
-  const evs = props.map(p => [p, evaluate(p)]);
+  const evs = props.map(p => [p, safeEval(p)]);
   const counts = { all: props.length, live: 0, pre: 0, won: 0, lost: 0 };
   evs.forEach(([, e]) => counts[bucket(e.status)]++);
   $('#filters').innerHTML = FILTERS.map(([k, l]) => `<button data-f="${k}" class="${filter === k ? 'on' : ''}">${l}${counts[k] ? ` <span class="mono" style="opacity:.6">${counts[k]}</span>` : ''}</button>`).join('');
@@ -728,13 +740,14 @@ function render() {
   // Don't rebuild a card mid-typing; the next poll would wipe the cursor.
   const active = document.activeElement;
   if (active?.closest?.('.editor')) {
-    evs.forEach(([p]) => { if (p.id !== editing) { const el = document.querySelector(`.card[data-id="${p.id}"]`); if (el) el.outerHTML = card(p); } });
+    evs.forEach(([p]) => { if (p.id !== editing) { const el = document.querySelector(`.card[data-id="${p.id}"]`); if (el) el.outerHTML = safeCard(p); } });
     wireCards();
     return;
   }
   const shown = evs.filter(([, e]) => filter === 'all' || bucket(e.status) === filter);
-  $('#board').innerHTML = shown.length ? shown.map(([p]) => card(p)).join('')
-    : `<div class="empty-board">${props.length ? '<b>Nothing here</b>' : '<b>No props yet</b>Search a player above to pin a prop.'}</div>`;
+  $('#board').innerHTML = shown.length ? shown.map(([p]) => safeCard(p)).join('')
+    : `<div class="empty-board">${props.length ? '<b>Nothing here</b><button class="ghost" id="showAll" style="margin-top:10px">Show all</button>' : '<b>No props yet</b>Search a player above to pin a prop.'}</div>`;
+  $('#showAll')?.addEventListener('click', () => { filter = 'all'; render(); });
   wireCards();
 }
 
@@ -744,7 +757,8 @@ function wireCards() {
     if (!p || el.dataset.wired) return;
     el.dataset.wired = 1;
     el.querySelector('[data-act="remove"]').onclick = () => { props = props.filter(x => x !== p); persist(); render(); };
-    el.querySelector('[data-act="edit"]').onclick = () => { editing = editing === p.id ? null : p.id; render(); };
+    el.querySelector('[data-act="edit"]')?.addEventListener('click', () => { editing = editing === p.id ? null : p.id; render(); });
+    if (!el.querySelector('[data-act="edit"]')) return;
     el.querySelector('[data-act="done"]')?.addEventListener('click', () => { editing = null; render(); });
     el.querySelectorAll('.editor [data-side]').forEach(b => b.onclick = () => { p.side = b.dataset.side; persist(); render(); });
     el.querySelectorAll('[data-pin]').forEach(b => b.onclick = () => { p.pin = b.dataset.pin; persist(); render(); });
@@ -771,7 +785,7 @@ function wireCards() {
 }
 
 $('#clearSettled').onclick = () => {
-  props = props.filter(p => !['won', 'lost'].includes(bucket(evaluate(p).status)));
+  props = props.filter(p => !['won', 'lost'].includes(bucket(safeEval(p).status)));
   persist(); render();
 };
 $('#refreshBtn').onclick = () => refresh();
