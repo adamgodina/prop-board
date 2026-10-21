@@ -316,6 +316,12 @@ const STATS = {
   ],
 };
 const statOf = p => STATS[p.league].find(s => s.id === p.stat);
+// Props saved with another league's stat (an NBA guard read as a goalie) fall back to the league default.
+const repairStats = () => {
+  const bad = props.filter(p => STATS[p.league] && !statOf(p));
+  bad.forEach(p => { p.stat = STATS[p.league][0].id; });
+  if (bad.length) persist();
+};
 
 const STORE = 'propboard.v1';
 const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
@@ -446,10 +452,11 @@ function paintResults() {
 
 function pickPlayer(r) {
   const parsed = parseQuery($('#q').value);
-  const isPitcher = /^(P|SP|RP|G)$/.test(r.position);
+  // NBA guards are also "G", so the position only means pitcher/goalie per league.
+  const isPitcher = r.league === 'mlb' ? /^(P|SP|RP)$/.test(r.position) : r.league === 'nhl' && r.position === 'G';
   draft = {
     ...r,
-    stat: guessStat(r.league, parsed.raw, isPitcher) || (isPitcher ? (r.league === 'nhl' ? 'saves' : 'pK') : STATS[r.league][0].id),
+    stat: guessStat(r.league, parsed.raw, isPitcher) || (isPitcher ? STATS[r.league].find(x => x.pitcher).id : STATS[r.league][0].id),
     line: parsed.line ?? '',
     side: parsed.side || 'over',
   };
@@ -886,6 +893,7 @@ async function pull() {
     if (!g.notModified && !pushTimer && !pushing) {
       gistEtag = g.etag;
       const m = mergeIn(g.doc);
+      repairStats();
       if (m.localChanged) render();
       if (m.remoteStale) schedulePush();
     }
@@ -971,6 +979,7 @@ $('#syncBtn').onclick = () => {
   if (el.classList.contains('open')) { paintSyncPanel(); $('#tokenInput')?.focus(); }
 };
 
+repairStats();
 render();
 setSyncState();
 pull().then(refresh);
